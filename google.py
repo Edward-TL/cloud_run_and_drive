@@ -51,6 +51,9 @@ class GoogleDrive:
         self.credentials = credentials
         self.service = build('drive', 'v3', credentials=credentials)
         self.files = self.service.files()
+        self.excel_mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        self.parquet_mimetype = 'application/x-parquet'
+        # self.parquet_mimetype = 'application/octet-stream'
 
     def create_folder(self, folder_name: str, parent_folder_id: str = None) -> str:
         """Create a folder in Google Drive and return its ID."""
