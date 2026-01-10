@@ -51,8 +51,9 @@ def load_to_excel(request: FlaskRequest) -> FlaskResponse:
         folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
         timestamp_column = os.getenv("TIMESTAMP_COLUMN")
         
-        parquet_file_id = os.getenv("PARQUET_FILE_ID")
-        excel_file_id = os.getenv("EXCEL_FILE_ID")
+        config = load_file_manager()
+        parquet_file_id = config.get("PARQUET_FILE_ID", "")
+        excel_file_id = config.get("EXCEL_FILE_ID", "")
 
     except Exception as e:
         return FlaskResponse(
