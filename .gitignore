@@ -204,3 +204,6 @@ cython_debug/
 # SECRETS
 .env
 secrets/
+# Made just for the record
+context.md
+context2.md
