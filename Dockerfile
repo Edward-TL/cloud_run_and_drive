@@ -6,7 +6,7 @@
 FROM python:3.13-slim
 
 # Establece el directorio de trabajo dentro del contenedor
-WORKDIR /dhelos-clean-plan-sells
+WORKDIR /cloud-run-and-drive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \
@@ -29,7 +29,7 @@ COPY . .
 
 # 'process_sheet_row' es el nombre de la función Python que quieres ejecutar
 # cuando se reciba una petición HTTP.
-ENV FUNCTION_TARGET=load_to_excel
+ENV FUNCTION_TARGET=load_to_drive
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
@@ -42,7 +42,7 @@ ENV PORT=8080
 
 # Cloud Functions en contenedores siempre esperan que la función escuche en el puerto 8080.
 # CMD ["gcloud", "functions", "deploy", "appointments",  "--trigger-http", "--allow-unauthenticated", "--port", "8080"]
-CMD ["functions-framework", "--target", "load_to_excel", "--port", "8080"]
+CMD ["functions-framework", "--target", "load_to_drive", "--port", "8080"]
 
 # Opcional: Exponer el puerto para desarrollo local, aunque Cloud Functions no lo necesita
 # al desplegar, es útil para testear el contenedor con `docker run -p 8080:8080 ...`
