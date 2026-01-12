@@ -2,36 +2,15 @@
 Google API tools needed
 """
 import os
-import json
-import mimetypes
-from collections import OrderedDict
-from io import BytesIO
-from dataclasses import dataclass, field
 from typing import Optional
 
-from dotenv import dotenv_values
+import mimetypes
 
+from io import BytesIO
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
-from google.oauth2 import service_account
 
-import gspread
-
-
-def get_env_vars(filepath: str = None) -> dict:
-    """
-    Reads an .env file if a path is provided,
-    otherwise returns the environment variables from the OS.
-    """
-    if filepath and os.path.exists(filepath):
-        return dotenv_values(filepath)
-    
-    # Return environment variables from the OS sorted alphabetically
-    env_dict = OrderedDict()
-    for key in sorted(os.environ.keys()):
-        env_dict[key] = os.environ[key]
-    return env_dict
 
 
 def get_file_size(file_path: str) -> str:
@@ -50,7 +29,7 @@ class GoogleDrive:
     def __init__(self, credentials):
         self.credentials = credentials
         self.service = build('drive', 'v3', credentials=credentials)
-        self.files = self.service.files()
+        self.file_services = self.service.files()
         self.excel_mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         self.parquet_mimetype = 'application/x-parquet'
         # self.parquet_mimetype = 'application/octet-stream'
@@ -63,7 +42,7 @@ class GoogleDrive:
             'parents': [parent_folder_id] if parent_folder_id else []
         }
 
-        created_folder = self.files.create(
+        created_folder = self.file_services.create(
             body=folder_metadata,
             fields='id'
         ).execute()
@@ -90,7 +69,7 @@ class GoogleDrive:
             query += f" and '{parent_folder_id}' in parents"
         
         try:
-            results = self.files.list(
+            results = self.file_services.list(
                 q=query,
                 spaces='drive',
                 fields='files(id, name)',
@@ -105,14 +84,48 @@ class GoogleDrive:
             return None
             
         except HttpError as e:
-            print(f"Error searching for folder: {e}")
+            print(f"Error searching for folder:\n\n{e}")
+            return None
+
+    def get_file_id(self, file_name: str, parent_folder_id: str = None) -> Optional[str]:
+        """
+        Get a file's ID by its name.
+        
+        Args:
+            file_name: Name of the file to find
+            parent_folder_id: Optional parent folder ID to search within
+            
+        Returns:
+            File ID if found, None otherwise
+        """
+        query = f"name = '{file_name}' and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+        
+        if parent_folder_id:
+            query += f" and '{parent_folder_id}' in parents"
+        
+        try:
+            results = self.file_services.list(
+                q=query,
+                spaces='drive',
+                fields='files(id, name)',
+                pageSize=10
+            ).execute()
+            
+            items = results.get('files', [])
+            
+            if items:
+                return items[0]['id']
+            return None
+            
+        except HttpError as e:
+            print(f"Error searching for file:\n\n{e}")
             return None
 
     def list_folder(self, parent_folder_id: str = None, delete: bool = False) -> list:
         """List folders and files in Google Drive."""
         query = f"'{parent_folder_id}' in parents and trashed=false" if parent_folder_id else None
         
-        results = self.files.list(
+        results = self.file_services.list(
             q=query,
             pageSize=1000,
             fields="nextPageToken, files(id, name, mimeType)"
@@ -133,12 +146,12 @@ class GoogleDrive:
     def delete_files(self, file_or_folder_id: str) -> bool:
         """Delete a file or folder in Google Drive by ID."""
         try:
-            self.files.delete(fileId=file_or_folder_id).execute()
+            self.file_services.delete(fileId=file_or_folder_id).execute()
             print(f"Successfully deleted file/folder with ID: {file_or_folder_id}")
             return True
         except HttpError as e:
             print(f"Error deleting file/folder with ID: {file_or_folder_id}")
-            print(f"Error details: {str(e)}")
+            print(f"Error details:\n\n{str(e)}")
             return False
 
     def download_file(self, file_id: str, file_name: str = None) -> tuple[BytesIO, Optional[str]]:
@@ -153,7 +166,7 @@ class GoogleDrive:
             Tuple of (BytesIO buffer, file_path or None)
         """
         try:
-            request = self.files.get_media(fileId=file_id)
+            request = self.file_services.get_media(fileId=file_id)
             buffer = BytesIO()
             downloader = MediaIoBaseDownload(buffer, request)
             
@@ -174,12 +187,13 @@ class GoogleDrive:
             return buffer, None
             
         except HttpError as e:
-            print(f"Error downloading file: {e}")
+            print(f"Error downloading file:\n\n{e}")
             return None, None
 
     def upload_file(self, file_name: str, file_path: str, drive_folder_id: str) -> Optional[str]:
         """
-        Upload a new file to Google Drive.
+        Upload a file to Google Drive. If a file with the same name exists
+        in the folder, it will be updated instead of creating a duplicate.
         
         Args:
             file_name: Name for the file in Drive
@@ -193,6 +207,15 @@ class GoogleDrive:
             complete_file_name = os.path.join(file_path, file_name)
             if not os.path.exists(complete_file_name):
                 raise IOError(f"File does not exist: {complete_file_name}")
+            
+            # Check if file already exists in the folder
+            existing_file_id = self.get_file_id(file_name, drive_folder_id)
+            
+            if existing_file_id:
+                # Update existing file
+                print(f"File '{file_name}' already exists. Updating...")
+                success = self.update_file(existing_file_id, complete_file_name)
+                return existing_file_id if success else None
 
             file_metadata = {
                 "name": file_name,
@@ -204,9 +227,10 @@ class GoogleDrive:
             media = MediaFileUpload(complete_file_name, mimetype=file_type)
             print(f"Uploading file: {file_name} ({get_file_size(complete_file_name)})")
             
-            file = self.files.create(
+            file = self.file_services.create(
                 body=file_metadata,
                 media_body=media,
+                supportsAllDrives=True,
                 fields="id"
             ).execute()
 
@@ -215,7 +239,7 @@ class GoogleDrive:
             return file_id
 
         except HttpError as error:
-            print(f"An error occurred: {error}")
+            print(f"An error occurred:\n\n{error}")
             return None
 
     def update_file(self, file_id: str, local_file_path: str) -> bool:
@@ -238,27 +262,33 @@ class GoogleDrive:
             
             print(f"Updating file: {file_id} ({get_file_size(local_file_path)})")
             
-            self.files.update(
+            self.file_services.update(
                 fileId=file_id,
-                media_body=media
+                media_body=media,
+                supportsAllDrives=True,
+                fields="id"
             ).execute()
             
             print(f"Successfully updated file: {file_id}")
             return True
             
         except HttpError as error:
-            print(f"Error updating file: {error}")
+            print(f"Error updating file:\n\n{error}")
             return False
 
-    def upload_buffer(self, buffer: BytesIO, file_name: str, drive_folder_id: str, 
+    def upload_buffer(self, buffer: BytesIO, file_name: str,
+                      drive_folder_id: Optional[str] = None,
+                      drive_folder_name: Optional[str] = None,
                       mimetype: str = 'application/octet-stream') -> Optional[str]:
         """
-        Upload a file from a BytesIO buffer to Google Drive.
+        Upload a file from a BytesIO buffer to Google Drive. If a file with 
+        the same name exists in the folder, it will be updated instead.
         
         Args:
             buffer: BytesIO buffer containing the file data
             file_name: Name for the file in Drive
             drive_folder_id: Google Drive folder ID to upload to
+            drive_folder_name: Google Drive folder name to upload to
             mimetype: MIME type of the file
             
         Returns:
@@ -266,8 +296,24 @@ class GoogleDrive:
         """
         from googleapiclient.http import MediaIoBaseUpload
         
+        if drive_folder_name:
+            drive_folder_id = self.get_folder_id(drive_folder_name)
+            print(drive_folder_id)
+        if drive_folder_id is None:
+            raise ValueError("`drive_folder_name` or `drive_folder_id` must be given")
+        
         try:
             buffer.seek(0)
+            
+            # Check if file already exists in the folder
+            existing_file_id = self.get_file_id(file_name, drive_folder_id)
+            
+            if existing_file_id:
+                # Update existing file
+                print(f"File '{file_name}' already exists. Updating...")
+                success = self.update_file_from_buffer(existing_file_id, buffer, mimetype)
+                return existing_file_id if success else None
+            
             file_metadata = {
                 "name": file_name,
                 'parents': [drive_folder_id],
@@ -275,9 +321,10 @@ class GoogleDrive:
             
             media = MediaIoBaseUpload(buffer, mimetype=mimetype, resumable=True)
             
-            file = self.files.create(
+            file = self.file_services.create(
                 body=file_metadata,
                 media_body=media,
+                supportsAllDrives=True,
                 fields="id"
             ).execute()
             
@@ -286,7 +333,7 @@ class GoogleDrive:
             return file_id
             
         except HttpError as error:
-            print(f"Error uploading buffer: {error}")
+            print(f"Error uploading buffer:\\n\\n{error}")
             return None
 
     def update_file_from_buffer(self, file_id: str, buffer: BytesIO, 
@@ -308,64 +355,15 @@ class GoogleDrive:
             buffer.seek(0)
             media = MediaIoBaseUpload(buffer, mimetype=mimetype, resumable=True)
             
-            self.files.update(
+            self.file_services.update(
                 fileId=file_id,
                 media_body=media
             ).execute()
             
-            print(f"Successfully updated file from buffer: {file_id}")
+            print(f"Successfully updated file from buffer:\n\n{file_id}")
             return True
             
         except HttpError as error:
-            print(f"Error updating file from buffer: {error}")
+            print(f"Error updating file from buffer:\n\n{error}")
             return False
 
-
-@dataclass
-class GoogleEnv:
-    """Google environment variables and credentials manager."""
-    
-    env_path: Optional[str] = None
-    env_var_name: str = 'GOOGLE'
-    scopes: tuple = field(default_factory=lambda: (
-        'https://spreadsheets.google.com/feeds',
-        'https://www.googleapis.com/auth/drive',
-        'https://www.googleapis.com/auth/spreadsheets',
-    ))
-    
-    # These will be set in __post_init__
-    credentials: service_account.Credentials = field(init=False, default=None)
-    creds_with_scope: service_account.Credentials = field(init=False, default=None)
-
-    def __post_init__(self):
-        # Load credentials info
-        if self.env_path:
-            # Load from .env file - expects JSON string in file
-            env_vals = get_env_vars(self.env_path)
-            creds_info = env_vals.get(self.env_var_name)
-            if creds_info:
-                creds_info = json.loads(creds_info)
-            else:
-                raise ValueError(f"'{self.env_var_name}' not found in {self.env_path}")
-        else:
-            # Load from OS environment variable
-            creds_json = os.getenv(self.env_var_name)
-            if not creds_json:
-                raise ValueError(f"Environment variable '{self.env_var_name}' not set")
-            creds_info = json.loads(creds_json)
-        
-        # Create credentials from service account info
-        self.credentials = service_account.Credentials.from_service_account_info(creds_info)
-        self.creds_with_scope = self.credentials.with_scopes(self.scopes)
-    
-    def sheets_client(self) -> gspread.Client:
-        """Get authorized gspread client for Google Sheets."""
-        return gspread.authorize(self.creds_with_scope)
-
-    def drive_service(self) -> GoogleDrive:
-        """Get GoogleDrive service instance."""
-        return GoogleDrive(self.creds_with_scope)
-
-
-# Create default instance (will fail if GOOGLE env var not set - catch at import time if needed)
-# Google = GoogleEnv()

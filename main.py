@@ -19,7 +19,7 @@ from flask import (
     Request as FlaskRequest
 )
 
-from google import GoogleEnv
+from google_toolbox.gdrive import GoogleEnv
 
 from helpers import (
     is_valid_request,
@@ -30,7 +30,7 @@ from helpers import (
 )
 
 @functions_http
-def load_to_excel(request: FlaskRequest) -> FlaskResponse:
+def load_sales_files(request: FlaskRequest) -> FlaskResponse:
     """
     HTTP entry point for receiving Wix Plan Sales data.
     
@@ -52,8 +52,8 @@ def load_to_excel(request: FlaskRequest) -> FlaskResponse:
         timestamp_column = os.getenv("TIMESTAMP_COLUMN")
         
         config = load_file_manager()
-        parquet_file_id = config.get("PARQUET_FILE_ID", "")
-        excel_file_id = config.get("EXCEL_FILE_ID", "")
+        parquet_file_id = config.get("PARQUET_FILE_ID")
+        excel_file_id = config.get("EXCEL_FILE_ID")
 
     except Exception as e:
         return FlaskResponse(
@@ -72,7 +72,9 @@ def load_to_excel(request: FlaskRequest) -> FlaskResponse:
     
     # Initialize Google Drive
     try:
-        google_env = GoogleEnv()
+        google_env = GoogleEnv(
+            
+        )
         drive = google_env.drive_service()
     except Exception as e:
         return FlaskResponse(
@@ -81,6 +83,12 @@ def load_to_excel(request: FlaskRequest) -> FlaskResponse:
             mimetype='application/json'
         )
     
+    # Confirm the existence of the parquet_id:
+    if parquet_file_id is None:
+        parquet_file_id = drive.get_file_id(f"{file_name}.parquet")
+        excel_file_id = drive.get_file_id(f"{file_name}.xlsx")
+            
+
     # Flatten the nested dictionary
     flat_data = flat_dictionary(data)
     
@@ -142,7 +150,7 @@ def load_to_excel(request: FlaskRequest) -> FlaskResponse:
                 parquet_buffer,
                 f"{file_name}.parquet",
                 folder_id,
-                mimetype=drive.parquet_mimetype
+                mimetype = drive.parquet_mimetype
             )
             config["PARQUET_FILE_ID"] = parquet_file_id
     except Exception as e:
@@ -171,7 +179,7 @@ def load_to_excel(request: FlaskRequest) -> FlaskResponse:
                 excel_buffer,
                 f"{file_name}.xlsx",
                 folder_id,
-                mimetype=excel_mimetype
+                mimetype = drive.excel_mimetype
             )
             config["EXCEL_FILE_ID"] = excel_file_id
     except Exception as e:
