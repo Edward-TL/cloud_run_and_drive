@@ -1,12 +1,12 @@
-# Dhelos Clean Plan Sells
+# Cloud Run Service for structuring API POST JSON data to Google Drive excel and parquet files
 
-Cloud Run service that receives Wix Plan Sales webhooks and stores data in Google Drive Excel files.
+Cloud Run service that receives API POST JSON data and stores data in Google Drive excel and parquet files.
 
 ## Features
 
-- Receives POST webhooks from Wix Pricing Plans API
+- Receives API POST JSON data
 - Flattens nested JSON data into single-level format
-- Appends data to Excel file stored in Google Drive
+- Appends data to Excel and parquet files stored in Google Drive
 - Auto-creates headers if Excel file is empty
 
 ## Project Structure
@@ -93,7 +93,7 @@ Cloud Run service that receives Wix Plan Sales webhooks and stores data in Googl
    from google_toolbox import GoogleEnv, AuthMethodClass
    
    google_env = GoogleEnv(
-       auth_method=AuthMethodClass.OAUTH,
+       auth_method=AuthMethodClass.OAUTH, # Or simple "oauth" if you're using environment variable
        json_credentials="oauth.json"
    )
    # First run opens a browser window to authorize access.
@@ -149,12 +149,12 @@ Cloud Run service that receives Wix Plan Sales webhooks and stores data in Googl
 
 ```bash
 # Build and push
-docker build -t us-central1-docker.pkg.dev/PROJECT_ID/dhelos-functions/dhelos-clean-plan-sells .
-docker push us-central1-docker.pkg.dev/PROJECT_ID/dhelos-functions/dhelos-clean-plan-sells
+docker build -t us-central1-docker.pkg.dev/PROJECT_ID/cloud-run-service .
+docker push us-central1-docker.pkg.dev/PROJECT_ID/cloud-run-service
 
 # Deploy
-gcloud run deploy dhelos-clean-plan-sells \
-  --image us-central1-docker.pkg.dev/PROJECT_ID/dhelos-functions/dhelos-clean-plan-sells \
+gcloud run deploy cloud-run-service \
+  --image us-central1-docker.pkg.dev/PROJECT_ID/cloud-run-service \
   --region us-central1 \
   --allow-unauthenticated \
   --set-env-vars "GOOGLE_DRIVE_FILE_ID=your-file-id"
