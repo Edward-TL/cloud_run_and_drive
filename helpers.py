@@ -11,6 +11,11 @@ from pathlib import Path
 import json
 import pandas as pd
 
+from flask import (
+    Response as FlaskResponse,
+    Request as FlaskRequest
+)
+
 # Path to file_manager.json
 FILE_MANAGER_PATH = Path(__file__).parent / "file_manager.json"
 
@@ -27,7 +32,7 @@ def save_file_manager(config: dict) -> None:
         json.dump(config, f, indent=4)
 
 
-def is_valid_request(request: FlaskRequest) -> (FlaskResponse, dict):
+def is_valid_request(request: FlaskRequest) -> tuple[FlaskResponse, dict]:
     """
     Validate if the request is valid.
     """
