@@ -103,7 +103,10 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
             
     # Flatten the nested dictionary
     flat_data = flat_dictionary(data)
-
+    json_file_name = f"{file_name}.json"
+    # Keep a record of the json received
+    with open(json_file_name, 'w') as json_file:
+        json.dump(flat_data, json_file, indent=2)
     # Step 1: Check if file exists
     update_df = False
     if parquet_file_id:
