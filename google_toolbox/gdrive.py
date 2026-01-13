@@ -276,10 +276,13 @@ class GoogleDrive:
             print(f"Error updating file:\n\n{error}")
             return False
 
-    def upload_buffer(self, buffer: BytesIO, file_name: str,
-                      drive_folder_id: Optional[str] = None,
-                      drive_folder_name: Optional[str] = None,
-                      mimetype: str = 'application/octet-stream') -> Optional[str]:
+    def upload_buffer(self,
+                    buffer: BytesIO,
+                    file_name: Optional[str] = None,
+                    file_id: Optional[str] = None,
+                    drive_folder_id: Optional[str] = None,
+                    drive_folder_name: Optional[str] = None,
+                    mimetype: str = 'application/octet-stream') -> Optional[str]:
         """
         Upload a file from a BytesIO buffer to Google Drive. If a file with 
         the same name exists in the folder, it will be updated instead.
@@ -287,6 +290,7 @@ class GoogleDrive:
         Args:
             buffer: BytesIO buffer containing the file data
             file_name: Name for the file in Drive
+            file_id: Google Drive file ID to update
             drive_folder_id: Google Drive folder ID to upload to
             drive_folder_name: Google Drive folder name to upload to
             mimetype: MIME type of the file
@@ -306,7 +310,10 @@ class GoogleDrive:
             buffer.seek(0)
             
             # Check if file already exists in the folder
-            existing_file_id = self.get_file_id(file_name, drive_folder_id)
+            if file_name:
+                existing_file_id = self.get_file_id(file_name, drive_folder_id)
+            else:
+                existing_file_id = file_id
             
             if existing_file_id:
                 # Update existing file
