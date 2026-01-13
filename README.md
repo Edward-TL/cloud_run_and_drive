@@ -68,40 +68,58 @@ Cloud Run service that receives API POST JSON data and stores data in Google Dri
    google_env = GoogleEnv()
    ```
 
-   ### Option B: OAuth 2.0 (For local development with user files)
+   ### Option B: OAuth 2.0 (For local development & Cloud Run with User Account)
    
-   Best for accessing files owned by your personal Google account during development.
+   Best for accessing files owned by your personal Google account.
    
    #### **Settings Procedure:**
-   1. **Configure Consent Screen**: Go to **APIs & Services** → **OAuth consent screen**.
-      - Select **External**.
-      - Fill in required app info.
-      - **Scopes**: Add `.../auth/drive` and `.../auth/spreadsheets`.
-      - **Test Users**: Add your own Google email address.
-   2. **Create Credentials**: Go to **APIs & Services** → **Credentials**.
-      - Click **+ CREATE CREDENTIALS** → **OAuth client ID**.
-      - Select **Desktop app**.
-      - Click **CREATE** and download the JSON file (rename to `oauth.json`).
-   3. **Add Redirect URI**:
-      - Find your new Client ID under "OAuth 2.0 Client IDs".
-      - Click it to edit.
-      - Under **Authorized redirect URIs**, add: `http://localhost:8080/`
-      - Click **SAVE**.
+   1. **Create Credentials**: 
+      - Go to **APIs & Services** → **Credentials**.
+      - Create **OAuth client ID** (Desktop app).
+      - Download JSON, save as `secrets/client_secrets.json`.
+
+   2. **Generate Token (Required for Cloud Run)**:
+      Since Cloud Run cannot open a browser, you must generate a token locally first.
+      
+      ```bash
+      # Run the helper script
+      python generate_token.py
+      ```
+      - Follow the prompt to authorize access.
+      - A `token.json` file will be created.
+
+   3. **Configure Environment**:
+      
+      **Local Development:**
+      - Set `GOOGLE_OAUTH_TOKEN` to the content of `token.json`.
+      - OR just leave `token.json` in the working directory (automatic fallback).
+
+      **Cloud Run:**
+      - Copy the content of `token.json`.
+      - Create an environment variable `GOOGLE_OAUTH_TOKEN` with this value.
    
    **Usage:**
+   Option a:
    ```python
    from google_toolbox import GoogleEnv, AuthMethodClass
    
+   # Automatically checks GOOGLE_OAUTH_TOKEN env var first
    google_env = GoogleEnv(
-       auth_method=AuthMethodClass.OAUTH, # Or simple "oauth" if you're using environment variable
-       json_credentials="oauth.json"
+      auth_method=AuthMethodClass.OAUTH, 
+      json_credentials="secrets/token.json" # Fallback/Initial setup
    )
-   # First run opens a browser window to authorize access.
-   # Your token will be cached in 'oauth_token.json'.
    ```
 
-   > [!IMPORTANT]
-   > OAuth browser flow **does not work** in Cloud Run environments. Always use a Service Account for production deployments.
+   Option b:
+   ```python
+   from google_toolbox import GoogleEnv, AuthMethodClass
+   
+   # Automatically checks GOOGLE_OAUTH_TOKEN env var first
+   google_env = GoogleEnv(
+      auth_method=AuthMethodClass.OAUTH, 
+      oauth_token="{'token': 'your-token-here', 'refresh_token': 'your-refresh-token-here', 'token_uri': 'https://oauth2.googleapis.com/token', 'client_id': 'your-client-id', 'client_secret': 'your-client-secret'}"
+   )
+   ```
 
 3. **Set environment variables:**
    ```bash

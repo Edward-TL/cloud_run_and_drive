@@ -67,20 +67,17 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
         excel_file_id = os.getenv("EXCEL_FILE_ID")
 
         login_method = os.getenv("LOGIN_METHOD")
-        google_credentials = os.getenv("GOOGLE_CREDENTIALS")
+        
+        # Try to get OAuth token from env
+        oauth_token_str = os.getenv("GOOGLE_OAUTH_TOKEN")
+        oauth_token = None
+        if oauth_token_str:
+            try:
+                oauth_token = json.loads(oauth_token_str)
+            except Exception as e:
+                print(f"Warning: Failed to parse GOOGLE_OAUTH_TOKEN: {e}")
 
 
-        # env_vars = {
-        #     "FILE_NAME": file_name,
-        #     "GOOGLE_DRIVE_FOLDER_ID": folder_id,
-        #     "TIMESTAMP_COLUMN": timestamp_column,
-        #     "PARQUET_FILE_ID": parquet_file_id,
-        #     "EXCEL_FILE_ID": excel_file_id,
-        #     "GOOGLE_CREDENTIALS": google_credentials,
-        #     "LOGIN_METHOD": login_method
-        # }
-        # for name, value in env_vars.items():
-        #     print(f"{name}: {value}")
     except Exception as e:
         return error_response(f"Failed to load config: {str(e)}")
     
@@ -91,8 +88,8 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
     # Initialize Google Drive
     try:
         google_env = GoogleEnv(
-            json_credentials = google_credentials,
-            auth_method = login_method
+            auth_method = login_method,
+            oauth_token = oauth_token
         )
         drive = google_env.drive_service()
     except Exception as e:
@@ -106,7 +103,7 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
             
     # Flatten the nested dictionary
     flat_data = flat_dictionary(data)
-    
+
     # Step 1: Check if file exists
     update_df = False
     if parquet_file_id:

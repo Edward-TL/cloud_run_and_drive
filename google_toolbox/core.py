@@ -64,6 +64,7 @@ class GoogleEnv:
     env_path: Optional[str] = None
     json_credentials: Optional[str] = None
     env_var_name: str = 'GOOGLE_CREDENTIALS'
+    oauth_token: Optional[dict | str] = None
     scopes: tuple = field(default_factory=lambda: (
         DriveScopes.DRIVE,
         DriveScopes.SHEETS,
@@ -74,6 +75,13 @@ class GoogleEnv:
     creds_with_scope: service_account.Credentials = field(init=False, default=None)
 
     def __post_init__(self):
+        # Ensure oauth_token is a dict if passed as string
+        if self.oauth_token and isinstance(self.oauth_token, str):
+            try:
+                self.oauth_token = json.loads(self.oauth_token)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Failed to parse oauth_token string as JSON: {e}")
+
         self.creds_info = self._get_creds_info()
 
         if self.auth_method in {AuthMethodClass.SERVICE_ACCOUNT, "service_account"}:
@@ -85,6 +93,9 @@ class GoogleEnv:
     
     def _get_creds_info(self) -> dict:
         """Load credentials info from file or environment variable."""
+        if self.auth_method in {AuthMethodClass.OAUTH, "oauth"} and self.oauth_token:
+            return {}  # Not needed for OAuth if token provided directly
+
         if self.env_path:
             # Load from .env file - expects JSON string in file
             env_vals = get_env_vars(self.env_path)
@@ -100,12 +111,19 @@ class GoogleEnv:
             # Load from OS environment variable
             creds_json = os.getenv(self.env_var_name)
             if not creds_json:
-                raise ValueError(f"Environment variable '{self.env_var_name}' not set")
+                # If using OAuth and we have a token, we might not need CREDENTIALS env var for client config
+                # unless we need to refresh with client secret.
+                # But for simplicity, if oauth_token is NOT provided, we need something.
+                if self.auth_method in {AuthMethodClass.OAUTH, "oauth"} and self.oauth_token:
+                    return {}
+                return {} # Return empty if not found, let specific loaders complain if they need it code
             return json.loads(creds_json)
     
     def _load_service_account_credentials(self):
         """Load credentials using Service Account authentication.
         """
+        if not self.creds_info:
+             raise ValueError(f"Environment variable '{self.env_var_name}' not set or empty for Service Account")
 
         self.credentials = service_account.Credentials.from_service_account_info(self.creds_info)
         self.creds_with_scope = self.credentials.with_scopes(self.scopes)
@@ -117,6 +135,12 @@ class GoogleEnv:
         On first run, opens a browser for user authorization.
         Caches the token for subsequent use.
         """
+        # 0. Check if token is provided directly
+        if self.oauth_token:
+            self.credentials = OAuthCredentials.from_authorized_user_info(self.oauth_token, list(self.scopes))
+            self.creds_with_scope = self.credentials
+            return
+
         # Determine token cache path
         if self.json_credentials:
             token_path = self.json_credentials.replace('.json', '_token.json')
