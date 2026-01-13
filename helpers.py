@@ -16,20 +16,7 @@ from flask import (
     Request as FlaskRequest
 )
 
-# Path to file_manager.json
-FILE_MANAGER_PATH = Path(__file__).parent / "file_manager.json"
-
-
-def load_file_manager() -> dict:
-    """Load file_manager.json configuration."""
-    with open(FILE_MANAGER_PATH, "r") as f:
-        return json.load(f)
-
-
-def save_file_manager(config: dict) -> None:
-    """Save updated configuration to file_manager.json."""
-    with open(FILE_MANAGER_PATH, "w") as f:
-        json.dump(config, f, indent=4)
+from flask_responses import error_response
 
 
 def is_valid_request(request: FlaskRequest) -> tuple[FlaskResponse, dict]:
@@ -37,10 +24,9 @@ def is_valid_request(request: FlaskRequest) -> tuple[FlaskResponse, dict]:
     Validate if the request is valid.
     """
     if request.method != 'POST':
-        bad_response = FlaskResponse(
-            '{"error": "Method not allowed. Use POST."}',
-            status=405,
-            mimetype='application/json'
+        bad_response = error_response(
+            "Method not allowed. Use POST.",
+            status=405
         )
 
     # Parse JSON body
@@ -51,10 +37,9 @@ def is_valid_request(request: FlaskRequest) -> tuple[FlaskResponse, dict]:
         return (None, data)
         
     except Exception as e:
-        bad_response = FlaskResponse(
-            f'{{"error": "Invalid JSON: {str(e)}"}}',
-            status=400,
-            mimetype='application/json'
+        bad_response = error_response(
+            f"Invalid JSON: {str(e)}",
+            status=400
         )
     
     return (bad_response, data)
@@ -104,17 +89,24 @@ def is_new_data(df: pd.DataFrame, new_data: dict, compare_col: str) -> bool:
         return True
     
     # Get the new timestamp value
-    new_timestamp = new_data.get(compare_col)
-    if not new_timestamp:
+    new_data_compare_value = new_data.get(compare_col)
+    if not new_data_compare_value:
+        print("New data does not contain timestamp column")
         return False
     
     # Check if timestamp column exists in DataFrame
     if compare_col not in df.columns:
+        print("Timestamp column does not exist in DataFrame")
         return False
     
     # Get last timestamp in DataFrame
-    last_timestamp = df[compare_col].iloc[-1]
+    last_data_compare_value = df[compare_col].iloc[-1]
     
     # Compare timestamps (assuming string format that can be compared)
-    return str(new_timestamp) > str(last_timestamp)
+    print("Comparing timestamps:")
+    print("Last column:", last_data_compare_value)
+    print("New column:", new_data_compare_value)
+
+    # Return True if new data is different from last data
+    return str(new_data_compare_value) != str(last_data_compare_value)
 

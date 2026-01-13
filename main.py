@@ -1,3 +1,7 @@
+import warnings
+# Suppress any UserWarning related to pkg_resources to avoid the deprecation notice
+warnings.filterwarnings("ignore", ".*pkg_resources.*")
+
 """
 MAIN FILE
 
@@ -12,6 +16,8 @@ import json
 from io import BytesIO
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 import pandas as pd
 from functions_framework import http as functions_http
 from flask import (
@@ -19,18 +25,24 @@ from flask import (
     Request as FlaskRequest
 )
 
-from google_toolbox.gdrive import GoogleEnv
+from google_toolbox import GoogleEnv
 
 from helpers import (
     is_valid_request,
-    load_file_manager,
-    save_file_manager,
     flat_dictionary,
     is_new_data
 )
 
+from flask_responses import (
+    error_response,
+    success_response,
+    skipped_response
+)
+
+load_dotenv()
+
 @functions_http
-def load_sales_files(request: FlaskRequest) -> FlaskResponse:
+def load_to_drive(request: FlaskRequest) -> FlaskResponse:
     """
     HTTP entry point for receiving Wix Plan Sales data.
     
@@ -47,48 +59,51 @@ def load_sales_files(request: FlaskRequest) -> FlaskResponse:
 
     # Load configuration
     try:
+        
         file_name = os.getenv("FILE_NAME")
         folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
-        timestamp_column = os.getenv("TIMESTAMP_COLUMN")
-        
-        config = load_file_manager()
-        parquet_file_id = config.get("PARQUET_FILE_ID")
-        excel_file_id = config.get("EXCEL_FILE_ID")
+        compare_column = os.getenv("PLAN_ORDER_ID")
+        parquet_file_id = os.getenv("PARQUET_FILE_ID")
+        excel_file_id = os.getenv("EXCEL_FILE_ID")
 
+        login_method = os.getenv("LOGIN_METHOD")
+        google_credentials = os.getenv("GOOGLE_CREDENTIALS")
+
+
+        # env_vars = {
+        #     "FILE_NAME": file_name,
+        #     "GOOGLE_DRIVE_FOLDER_ID": folder_id,
+        #     "TIMESTAMP_COLUMN": timestamp_column,
+        #     "PARQUET_FILE_ID": parquet_file_id,
+        #     "EXCEL_FILE_ID": excel_file_id,
+        #     "GOOGLE_CREDENTIALS": google_credentials,
+        #     "LOGIN_METHOD": login_method
+        # }
+        # for name, value in env_vars.items():
+        #     print(f"{name}: {value}")
     except Exception as e:
-        return FlaskResponse(
-            f'{{"error": "Failed to load config: {str(e)}"}}',
-            status=500,
-            mimetype='application/json'
-        )
+        return error_response(f"Failed to load config: {str(e)}")
     
     # Validate folder ID
     if not folder_id:
-        return FlaskResponse(
-            '{"error": "GOOGLE_DRIVE_FOLDER_ID not configured in file_manager.json"}',
-            status=500,
-            mimetype='application/json'
-        )
+        return error_response("GOOGLE_DRIVE_FOLDER_ID not configured in environment variables")
     
     # Initialize Google Drive
     try:
         google_env = GoogleEnv(
-            
+            json_credentials = google_credentials,
+            auth_method = login_method
         )
         drive = google_env.drive_service()
     except Exception as e:
-        return FlaskResponse(
-            f'{{"error": "Failed to initialize Google Drive: {str(e)}"}}',
-            status=500,
-            mimetype='application/json'
-        )
+        return error_response(f"Failed to initialize Google Drive: {str(e)}")
     
     # Confirm the existence of the parquet_id:
-    if parquet_file_id is None:
+    if parquet_file_id == "":
+        print("Parquet file ID not configured in environment variables. Getting file ID from Google Drive...")
         parquet_file_id = drive.get_file_id(f"{file_name}.parquet")
         excel_file_id = drive.get_file_id(f"{file_name}.xlsx")
             
-
     # Flatten the nested dictionary
     flat_data = flat_dictionary(data)
     
@@ -96,41 +111,43 @@ def load_sales_files(request: FlaskRequest) -> FlaskResponse:
     update_df = False
     if parquet_file_id:
         # Step 2.a: File exists - download and check for new data
+        print("Downloading parquet file...")
         try:
             buffer, _ = drive.download_file(parquet_file_id)
+
             if buffer:
                 df = pd.read_parquet(buffer)
-                update_df = is_new_data(df, flat_data)
+                print("Parquet file downloaded successfully")
+                update_df = is_new_data(
+                    df,
+                    flat_data,
+                    compare_col = compare_column
+                )
+                print("Data is new:", update_df)
             else:
                 # Download failed, treat as new file
+                print("Parquet file downloaded FAILED. Creating new file...")
                 df = pd.DataFrame()
                 update_df = True
         except Exception as e:
-            return FlaskResponse(
-                f'{{"error": "Failed to download parquet: {str(e)}"}}',
-                status=500,
-                mimetype='application/json'
-            )
+            return error_response(f"Failed to download parquet: {str(e)}")
     else:
         # Step 2.b: File does not exist
+        print("Parquet file DOES NOT EXIST. Creating new file...")
         df = pd.DataFrame()
         update_df = True
     
-    
+    flat_data['request_date'] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
     df_new = pd.DataFrame([flat_data])
     
     # Step 3.a: If update is not needed
     if not update_df:
-        return FlaskResponse(
-            '{"status": "skipped", "message": "Data already exists in file"}',
-            status=200,
-            mimetype='application/json'
-        )
+        return skipped_response("Data already exists in file")
     
     # Step 3.b: Update DataFrame if needed
     # Append new data
     df = pd.concat([df, df_new], ignore_index=True)
-    
+    print("Dataframe updated successfully. New shape:", df.shape)
     # Step 4: Save and upload Parquet file
     try:
         parquet_buffer = BytesIO()
@@ -144,22 +161,20 @@ def load_sales_files(request: FlaskRequest) -> FlaskResponse:
                 parquet_buffer, 
                 mimetype=drive.parquet_mimetype
             )
+            print("Parquet file updated successfully")
         else:
             # Create new file
             parquet_file_id = drive.upload_buffer(
                 parquet_buffer,
                 f"{file_name}.parquet",
-                folder_id,
+                drive_folder_id = folder_id,
                 mimetype = drive.parquet_mimetype
             )
-            config["PARQUET_FILE_ID"] = parquet_file_id
+            print("Parquet file created successfully")
     except Exception as e:
-        return FlaskResponse(
-            f'{{"error": "Failed to save parquet: {str(e)}"}}',
-            status=500,
-            mimetype='application/json'
-        )
+        return error_response(f"Failed to save parquet: {str(e)}")
     
+
     # Step 5: Save and upload Excel file
     try:
         excel_buffer = BytesIO()
@@ -173,30 +188,25 @@ def load_sales_files(request: FlaskRequest) -> FlaskResponse:
                 excel_buffer, 
                 mimetype=drive.excel_mimetype
             )
+            print("Excel file updated successfully")
         else:
             # Create new file
             excel_file_id = drive.upload_buffer(
                 excel_buffer,
                 f"{file_name}.xlsx",
-                folder_id,
+                drive_folder_id = folder_id,
                 mimetype = drive.excel_mimetype
             )
-            config["EXCEL_FILE_ID"] = excel_file_id
+            print("Excel file created successfully")
+        
     except Exception as e:
-        return FlaskResponse(
-            f'{{"error": "Failed to save excel: {str(e)}"}}',
-            status=500,
-            mimetype='application/json'
-        )
+        return error_response(f"Failed to save excel: {str(e)}")
     
-    # Step 6: Update file_manager.json
-    try:
-        save_file_manager(config)
-    except Exception as e:
-        print(f"Warning: Failed to update file_manager.json: {e}")
-    
-    return FlaskResponse(
-        f'{{"status": "success", "message": "Data added", "rows": {len(df)}, "parquet_id": "{parquet_file_id}", "excel_id": "{excel_file_id}"}}',
-        status=200,
-        mimetype='application/json'
+    return success_response(
+        "Data added",
+        data={
+            "rows": len(df),
+            "parquet_id": parquet_file_id,
+            "excel_id": excel_file_id
+        }
     )
