@@ -103,10 +103,24 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
             
     # Flatten the nested dictionary
     flat_data = flat_dictionary(data)
-    json_file_name = f"{file_name}.json"
-    # Keep a record of the json received
-    with open(json_file_name, 'w') as json_file:
-        json.dump(flat_data, json_file, indent=2)
+    
+    # Upload JSON record to Drive
+    try:
+        json_buffer = BytesIO()
+        # Ensure we write bytes, json.dumps returns str so encode it
+        json_buffer.write(json.dumps(flat_data, indent=2).encode('utf-8'))
+        
+        drive.upload_buffer(
+            json_buffer,
+            f"{file_name}.json",
+            drive_folder_id=folder_id,
+            mimetype='application/json'
+        )
+        print(f"JSON record uploaded: {file_name}.json")
+    except Exception as e:
+        print(f"Failed to upload JSON record: {e}")
+        # Continue execution as this is just a record
+
     # Step 1: Check if file exists
     update_df = False
     if parquet_file_id:
