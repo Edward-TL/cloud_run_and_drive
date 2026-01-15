@@ -2,16 +2,20 @@
 Google API tools needed
 """
 import os
+from io import BytesIO
 from typing import Optional
-from google.auth.credentials import Credentials
 import mimetypes
 
-from io import BytesIO
+from pandas import DataFrame as pd_DataFrame
+
+from google.auth.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
+from .file_formats import FileFormats
 
+formats = FileFormats()
 
 def get_file_size(file_path: str) -> str:
     """Get human-readable file size."""
@@ -27,13 +31,21 @@ class GoogleDrive:
     """Google Drive API wrapper class."""
     
     def __init__(self, credentials: Credentials, main_folder_id: Optional[str] = None):
-        self.main_folder_id = main_folder_id
         self.credentials = credentials
+        self.main_folder_id = main_folder_id
         self.service = build('drive', 'v3', credentials=credentials)
         self.file_services = self.service.files()
         self.excel_mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         self.parquet_mimetype = 'application/x-parquet'
         # self.parquet_mimetype = 'application/octet-stream'
+
+    def _resolve_folder_id(self, folder_id: Optional[str] = None) -> str:
+        """Resolve folder_id using provided ID or default main_folder_id."""
+        if folder_id is None:
+            if self.main_folder_id is not None:
+                return self.main_folder_id
+            raise ValueError("`folder_id` must be given")
+        return folder_id
 
     def create_folder(self, folder_name: str, parent_folder_id: str = None) -> str:
         """Create a folder in Google Drive and return its ID."""
@@ -208,8 +220,7 @@ class GoogleDrive:
         Returns:
             File ID if successful, None otherwise
         """
-        if not drive_folder_id:
-            drive_folder_id = self.main_folder_id
+        drive_folder_id = self._resolve_folder_id(drive_folder_id)
         try:
             complete_file_name = os.path.join(file_path, file_name)
             if not os.path.exists(complete_file_name):
@@ -310,13 +321,9 @@ class GoogleDrive:
         if drive_folder_name:
             drive_folder_id = self.get_folder_id(drive_folder_name)
             print(drive_folder_id)
-        elif drive_folder_id is None and self.main_folder_id is not None:
-            drive_folder_id = self.main_folder_id
         
-        elif drive_folder_id is None and self.main_folder_id is None:
-            raise ValueError("`drive_folder_name` or `drive_folder_id` must be given")
-        else:
-            pass
+        if drive_folder_id is None:
+            drive_folder_id = self._resolve_folder_id(drive_folder_id)
         
         try:
             buffer.seek(0)
@@ -388,3 +395,62 @@ class GoogleDrive:
             print(f"Error updating file from buffer:\n\n{error}")
             return False
 
+    def upload_df_to_drive(
+        self,
+        df: pd_DataFrame,
+        file_name: str,
+        file_id: Optional[str] = None,
+        folder_id: Optional[str] = None,
+        file_format: str = 'parquet'
+    ) -> Optional[str]:
+        """
+        Upload a DataFrame to Google Drive using a buffer.
+        
+        Args:
+            df (pd_DataFrame): DataFrame to upload
+            file_name (str): Name for the file in Drive (without extension).
+            file_id (Optional[str]): Google Drive file ID to update. If not given, it will be searched by name.
+            folder_id (Optional[str]): Google Drive folder ID to upload to. If not given, main_folder_id will be used.
+            file_format (str): 'parquet', 'csv' or 'excel'.
+        """
+        
+        formats.is_format_available(file_format)
+
+        config = formats.get_format_class(file_format)
+        
+        folder_id = self._resolve_folder_id(folder_id)
+        
+        if file_id is None or file_id == "":
+            file_id = self.get_file_id(file_name, folder_id)
+
+        try:
+            # 1. Dynamic Buffer Serialization
+            buffer = BytesIO()
+            method = getattr(df, config.method_name)
+            method(buffer, **config.pd_kwargs)
+            buffer.seek(0)
+            
+            full_name = f"{file_name}.{config.extension}"
+            
+            # 2. Drive API Interaction
+            if file_id:
+                self.update_file_from_buffer(
+                    file_id, 
+                    buffer, 
+                    mimetype=config.mimetype
+                )
+                print(f"File updated: {full_name} (ID: {file_id})")
+            else:
+                file_id = self.upload_buffer(
+                    buffer,
+                    full_name,
+                    drive_folder_id=folder_id,
+                    mimetype=config.mimetype
+                )
+                print(f"File created: {full_name} (ID: {file_id})")
+                
+            return file_id
+
+        except Exception as e:
+            print(f"Error when processing {file_format}: {e}")
+            raise e

@@ -189,9 +189,12 @@ class GoogleEnv:
         """Get authorized gspread client for Google Sheets."""
         return gspread.authorize(self.creds_with_scope)
 
-    def drive_service(self) -> GoogleDrive:
+    def drive_service(self, main_folder_id: Optional[str] = None) -> GoogleDrive:
         """Get GoogleDrive service instance."""
-        return GoogleDrive(self.creds_with_scope)
+        return GoogleDrive(
+            credentials = self.creds_with_scope,
+            main_folder_id = main_folder_id
+        )
 
 
 # Create default instance (will fail if GOOGLE env var not set - catch at import time if needed)

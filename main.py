@@ -165,63 +165,26 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
     # Append new data
     df = pd.concat([df, df_new], ignore_index=True)
     print("Dataframe updated successfully. New shape:", df.shape)
-    # Step 4: Save and upload Parquet file
-    try:
-        parquet_buffer = BytesIO()
-        df.to_parquet(parquet_buffer, index=False)
-        parquet_buffer.seek(0)
-        
-        if parquet_file_id:
-            # Update existing file
-            drive.update_file_from_buffer(
-                parquet_file_id, 
-                parquet_buffer, 
-                mimetype=drive.parquet_mimetype
-            )
-            print("Parquet file updated successfully")
-        else:
-            # Create new file
-            parquet_file_id = drive.upload_buffer(
-                parquet_buffer,
-                f"{file_name}.parquet",
-                mimetype = drive.parquet_mimetype
-            )
-            print("Parquet file created successfully")
-    except Exception as e:
-        return error_response(f"Failed to save parquet: {str(e)}")
-    
 
-    # Step 5: Save and upload Excel file
-    try:
-        excel_buffer = BytesIO()
-        df.to_excel(excel_buffer, index=False, sheet_name="VENTAS DHELOS")
-        excel_buffer.seek(0)
-        
-        if excel_file_id:
-            # Update existing file
-            drive.update_file_from_buffer(
-                excel_file_id, 
-                excel_buffer, 
-                mimetype=drive.excel_mimetype
-            )
-            print("Excel file updated successfully")
-        else:
-            # Create new file
-            excel_file_id = drive.upload_buffer(
-                excel_buffer,
-                f"{file_name}.xlsx",
-                mimetype = drive.excel_mimetype
-            )
-            print("Excel file created successfully")
-        
-    except Exception as e:
-        return error_response(f"Failed to save excel: {str(e)}")
+    # Step 4: Save and upload files from buffers
+    formats_ids = {
+        'parquet': parquet_file_id,
+        'excel': excel_file_id
+    }
     
+    response = {
+        file_format: drive.upload_df_to_drive(
+            df = df,
+            file_name = file_name,
+            folder_id = folder_id,
+            file_format = file_format,
+            file_id = file_id
+        ) for file_format, file_id in formats_ids.items()
+    }
+            
+    response['rows'] = len(df)
+
     return success_response(
         "Data added",
-        data={
-            "rows": len(df),
-            "parquet_id": parquet_file_id,
-            "excel_id": excel_file_id
-        }
+        data=response
     )
