@@ -3,7 +3,7 @@ Google API tools needed
 """
 import os
 from typing import Optional
-
+from google.auth.credentials import Credentials
 import mimetypes
 
 from io import BytesIO
@@ -26,7 +26,8 @@ def get_file_size(file_path: str) -> str:
 class GoogleDrive:
     """Google Drive API wrapper class."""
     
-    def __init__(self, credentials):
+    def __init__(self, credentials: Credentials, main_folder_id: Optional[str] = None):
+        self.main_folder_id = main_folder_id
         self.credentials = credentials
         self.service = build('drive', 'v3', credentials=credentials)
         self.file_services = self.service.files()
@@ -190,7 +191,7 @@ class GoogleDrive:
             print(f"Error downloading file:\n\n{e}")
             return None, None
 
-    def upload_file(self, file_name: str, file_path: str, drive_folder_id: str) -> Optional[str]:
+    def upload_file(self, file_name: str, file_path: str, drive_folder_id: Optional[str] = None) -> Optional[str]:
         """
         Upload a file to Google Drive. If a file with the same name exists
         in the folder, it will be updated instead of creating a duplicate.
@@ -203,6 +204,8 @@ class GoogleDrive:
         Returns:
             File ID if successful, None otherwise
         """
+        if not drive_folder_id:
+            drive_folder_id = self.main_folder_id
         try:
             complete_file_name = os.path.join(file_path, file_name)
             if not os.path.exists(complete_file_name):
@@ -303,23 +306,30 @@ class GoogleDrive:
         if drive_folder_name:
             drive_folder_id = self.get_folder_id(drive_folder_name)
             print(drive_folder_id)
-        if drive_folder_id is None:
+        elif drive_folder_id is None and self.main_folder_id is not None:
+            drive_folder_id = self.main_folder_id
+        
+        elif drive_folder_id is None and self.main_folder_id is None:
             raise ValueError("`drive_folder_name` or `drive_folder_id` must be given")
+        else:
+            pass
         
         try:
             buffer.seek(0)
-            
+            existing_file_id = None
             # Check if file already exists in the folder
             if file_name:
                 existing_file_id = self.get_file_id(file_name, drive_folder_id)
-            else:
-                existing_file_id = file_id
             
-            if existing_file_id:
+            if existing_file_id is not None:
                 # Update existing file
                 print(f"File '{file_name}' already exists. Updating...")
                 success = self.update_file_from_buffer(existing_file_id, buffer, mimetype)
-                return existing_file_id if success else None
+                if success:
+                    print(f'updated buffer as with ID: {existing_file_id}')
+                    return existing_file_id
+                else:
+                    return None
             
             file_metadata = {
                 "name": file_name,

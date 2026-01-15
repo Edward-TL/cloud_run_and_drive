@@ -91,7 +91,7 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
             auth_method = login_method,
             oauth_token = oauth_token
         )
-        drive = google_env.drive_service()
+        drive = google_env.drive_service(main_folder_id=folder_id)
     except Exception as e:
         return error_response(f"Failed to initialize Google Drive: {str(e)}")
     
@@ -102,24 +102,27 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
         excel_file_id = drive.get_file_id(f"{file_name}.xlsx")
             
     # Flatten the nested dictionary
-    flat_data = flat_dictionary(data)
-    
+    flat_data = flat_dictionary(data.get('data', {}))
+    info = {
+        'flat_data': flat_data,
+        'raw_data': data
+    }
     # Upload JSON record to Drive
     try:
         json_buffer = BytesIO()
         # Ensure we write bytes, json.dumps returns str so encode it
-        json_buffer.write(json.dumps(flat_data, indent=2).encode('utf-8'))
-        
-        drive.upload_buffer(
-            json_buffer,
-            f"{file_name}.json",
-            drive_folder_id=folder_id,
-            mimetype='application/json'
-        )
-        print(f"JSON record uploaded: {file_name}.json")
+        for reference, json_data in info.items():
+            json_buffer.write(json.dumps(json_data, indent=2).encode('utf-8'))
+
+            drive.upload_buffer(
+                json_buffer,
+                f"{file_name}_{reference}.json",
+                mimetype='application/json'
+            )
+            print(f"JSON record uploaded: {file_name}.json")
     except Exception as e:
         print(f"Failed to upload JSON record: {e}")
-        # Continue execution as this is just a record
+            # Continue execution as this is just a record
 
     # Step 1: Check if file exists
     update_df = False
@@ -181,7 +184,6 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
             parquet_file_id = drive.upload_buffer(
                 parquet_buffer,
                 f"{file_name}.parquet",
-                drive_folder_id = folder_id,
                 mimetype = drive.parquet_mimetype
             )
             print("Parquet file created successfully")
@@ -208,7 +210,6 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
             excel_file_id = drive.upload_buffer(
                 excel_buffer,
                 f"{file_name}.xlsx",
-                drive_folder_id = folder_id,
                 mimetype = drive.excel_mimetype
             )
             print("Excel file created successfully")
