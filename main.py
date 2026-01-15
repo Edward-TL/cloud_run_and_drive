@@ -130,7 +130,7 @@ def load_to_drive(request: FlaskRequest) -> FlaskResponse:
         # Step 2.a: File exists - download and check for new data
         print("Downloading parquet file...")
         try:
-            buffer, _ = drive.download_file(parquet_file_id)
+            buffer = drive.download_file(parquet_file_id)
 
             if buffer:
                 df = pd.read_parquet(buffer)

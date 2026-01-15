@@ -155,7 +155,10 @@ class GoogleDrive:
             print(f"Error details:\n\n{str(e)}")
             return False
 
-    def download_file(self, file_id: str, file_name: str = None) -> tuple[BytesIO, Optional[str]]:
+    def download_file(
+        self, file_id: str,
+        file_name: Optional[str] = None,
+        save_path: Optional[str] = None) -> BytesIO:
         """
         Downloads a file from Google Drive.
 
@@ -164,7 +167,7 @@ class GoogleDrive:
             file_name: Optional name to save the downloaded file as.
 
         Returns:
-            Tuple of (BytesIO buffer, file_path or None)
+            BytesIO buffer of the downloaded file.
         """
         try:
             request = self.file_services.get_media(fileId=file_id)
@@ -178,18 +181,19 @@ class GoogleDrive:
             buffer.seek(0)
             
             # Save to file if file_name provided
-            if file_name:
-                file_path = os.path.join(os.getcwd(), file_name)
+            if save_path:
+                file_path = os.path.join(save_path, file_name)
                 with open(file_path, "wb") as f:
                     f.write(buffer.getvalue())
                 buffer.seek(0)
-                return buffer, file_path
+                print(f"File downloaded and saved to: {file_path}")
+                return buffer
             
-            return buffer, None
+            return buffer
             
         except HttpError as e:
             print(f"Error downloading file:\n\n{e}")
-            return None, None
+            return None
 
     def upload_file(self, file_name: str, file_path: str, drive_folder_id: Optional[str] = None) -> Optional[str]:
         """
